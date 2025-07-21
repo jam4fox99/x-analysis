@@ -1,0 +1,9 @@
+Project started. I refined the user's initial project idea into a structured `project_overview.txt` file, outlining the goals, phases, risks, and proposed technology stack for building an X-based trading signal backtesting bot.
+
+I've formalized the user's plan into a TODO list and created the `requirements.txt` file to set up the Python project environment with all necessary libraries for data fetching, analysis, and backtesting.
+
+With the environment set up, I created a `.gitignore` file to protect sensitive information and guided the user on creating a local `.env` file to securely store their API credentials.
+
+We then built out the core analysis pipeline in `main.py`, using the OpenAI API to extract signals. After hitting persistent X API rate limits, we re-engineered the script with a robust, patient fetching mechanism to collect a large dataset. While this process runs in the background, we are using a small, representative sample of data to build out the `backtest.py` script to continue making progress.
+
+Pivoting from a full portfolio simulation, the project will now focus on direct ROI calculation for each trade pair. The backtesting script will be rewritten to fetch minute-by-minute price data from Alpha Vantage, match it to the exact time of the trade signal, and export a spreadsheet of individual trades with their ROI. 

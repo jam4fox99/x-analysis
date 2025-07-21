@@ -1,0 +1,71 @@
+# Project Overview: X-Based Trading Signal Analysis and Backtesting Bot
+
+## 1. Core Idea
+
+To develop a trading bot that analyzes posts from selected X users to identify trading signals. These signals will be timestamped, and their effectiveness will be evaluated through rigorous backtesting against historical market data. The initial phase of the project will focus exclusively on backtesting to validate the strategy and identify high-quality signal providers.
+
+## 2. Key Components & Feasibility
+
+### 2.1. Data Acquisition via X API
+
+- **Objective**: Pull posts from target X users.
+- **Feasibility**: Viable, but access to data is tiered and comes with costs and limitations.
+  - **Basic Tier ($200/mo)**: Allows reading 10,000 posts/month, limited to the most recent 3,200 posts per user. Suitable for a small-scale prototype.
+  - **Pro Tier ($5,000/mo)**: 1,000,000 posts/month, better for scaling but still has the 3,200 recent post limit per user timeline.
+  - **Enterprise Tier (Custom Price)**: Required for full historical access beyond the 3,200 post limit. Very expensive.
+- **Key Challenge**: Accessing deep historical data is a significant cost barrier. The initial prototype must work within the "most recent 3,200 posts" constraint.
+- **Compliance**: Adherence to X's Terms of Service is mandatory to avoid API access being revoked.
+
+### 2.2. Timestamping and Signal Extraction
+
+- **Timestamping**: Straightforward. The `created_at` field in the API response provides a precise UTC timestamp for each post.
+- **Signal Extraction**: This is the core AI challenge.
+  - **Method**: Use Natural Language Processing (NLP) to parse post content for trading signals (e.g., "buying $STOCK", "shorting $TICKER").
+  - **Tools**: Libraries like Hugging Face Transformers, spaCy, or APIs like OpenAI can be used to classify sentiment and identify entry/exit points.
+  - **Challenges**: Posts can be noisy, sarcastic, or promotional. A robust model is needed to filter out low-quality signals and interpret context correctly.
+
+### 2.3. Backtesting
+
+- **Objective**: Simulate the trading strategy based on extracted signals and historical market data to measure performance.
+- **Process**:
+  1.  Align the timestamped signals with historical price data from sources like Yahoo Finance or Alpha Vantage.
+  2.  Define trade execution logic (e.g., enter at the next market open after a signal).
+  3.  Define exit rules (e.g., based on a follow-up post, a fixed time, or price target).
+- **Tools**: Python libraries like `Backtrader` or `Zipline` are industry standards for this purpose.
+- **Metrics**: Evaluate performance using Sharpe ratio, win rate, max drawdown, and overall profitability.
+
+## 3. Project Phases
+
+### Phase 1: Backtesting and User Analysis (Current Focus)
+
+The primary goal is to prove the strategy's viability *before* considering live trading.
+- **Tasks**:
+  1.  Select a small group of influential traders on X to monitor.
+  2.  Subscribe to a suitable API tier (likely Basic) for initial data pulls.
+  3.  Develop the NLP model to extract signals from their recent posts.
+  4.  Build and run the backtesting engine to evaluate the historical performance of these signals.
+  5.  Analyze results to identify which users (if any) provide alpha.
+
+### Phase 2: Real-Time Implementation (Future Goal)
+
+- **Condition**: Only proceed if Phase 1 demonstrates consistent, positive backtesting results.
+- **Requirements**:
+  - Upgrade to a higher-tier API plan (Pro or Enterprise) to use the real-time streaming endpoint.
+  - Develop a live trading bot that executes trades based on real-time signals.
+  - Implement robust risk management and monitoring systems.
+
+## 4. Risks and Considerations
+
+- **Cost**: API fees are a primary constraint, especially for historical data and real-time streaming.
+- **Signal Quality**: Social media sentiment is notoriously noisy. The success of the entire project hinges on the ability to accurately extract high-quality signals.
+- **Overfitting**: Backtests may produce overly optimistic results that do not translate to live performance. Out-of-sample validation is critical.
+- **Market Dynamics**: Assumes past performance of a user's signals is indicative of future results, which may not be true.
+
+## 5. Proposed Tech Stack (Prototype)
+
+- **Programming Language**: Python
+- **X API Interaction**: `tweepy`
+- **Data Analysis**: `pandas`, `numpy`
+- **NLP/AI**: `Hugging Face Transformers`, `spaCy`
+- **Backtesting**: `backtrader`
+- **Market Data**: `yfinance` or `Alpha Vantage` 

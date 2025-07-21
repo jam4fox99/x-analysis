@@ -1,0 +1,5 @@
+---
+description: DO NOT EVER USE MOCK DATA
+globs:
+alwaysApply: true
+---

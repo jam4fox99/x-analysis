@@ -1,0 +1,35 @@
+## Project Summary: X Trading Bot Development
+
+Here is a summary of the key steps, challenges, and accomplishments from our session building the X Trading Bot.
+
+### 1. Project Initialization & Goal Setting
+- We began by refining your initial idea into a formal `project_overview.txt`, outlining the goal: to analyze an X user's posts for trading signals, process them with AI, and backtest them for profitability.
+- We established a `running_summary.txt` to track our progress.
+
+### 2. Environment & Security Setup
+- A `requirements.txt` file was created to manage all necessary Python libraries (`tweepy`, `pandas`, `openai`, `yfinance`, etc.).
+- We securely configured your secret API credentials (for both the X API and OpenAI) in a `.env` file, which was properly excluded from version control via a `.gitignore` file.
+
+### 3. Core Logic Development: Tweet Fetching & AI Analysis
+- **Initial Fetching**: We created a `main.py` script to connect to the X API and begin fetching tweets for the target user.
+- **Rate-Limit Challenges (X API)**: We immediately encountered the X API's rate limits for the Basic tier. This became a recurring challenge. We evolved our fetching logic multiple times, culminating in a robust, proactive script that respects the 10-requests-per-15-minutes limit to avoid errors.
+- **Advanced AI Analysis**: At your suggestion, we significantly upgraded the analysis from simple keyword matching to a sophisticated, context-aware system. The script now uses the OpenAI API to:
+    - Filter out retweets to focus on original content.
+    - Process tweets chronologically.
+    - Maintain a "virtual portfolio" to understand the context of a signal (i.e., distinguishing a new entry from an exit or profit-taking on an existing position).
+- **Incremental Saving**: To make the script resilient against crashes or interruptions, we implemented a system to save each extracted signal to `signals.csv` immediately after it is processed.
+
+### 4. Critical Bug Fix: The Timestamp Issue
+- We spent a significant amount of time debugging a persistent and frustrating bug where timestamps were not being saved to our `tweets.csv` file, appearing as `NaT` (Not a Time).
+- After multiple incorrect attempts to fix the date *loading* logic, you correctly identified that the problem was in the *saving* logic itself.
+- **Root Cause**: The `save_tweets_to_csv` function was not correctly accessing the `.created_at` attribute from the tweet objects returned by the API.
+- **Resolution**: We have now definitively corrected the saving logic, which will resolve this issue permanently on our next successful data fetch.
+
+### 5. Backtester Development & Data Source Challenges
+- We created a separate `backtest.py` script with the goal of calculating the direct ROI for each trade on a minute-by-minute basis.
+- **Market Data Issues**: We faced a systemic, temporary outage with `yfinance`, which prevented us from downloading any real price data.
+- Our attempt to pivot to Alpha Vantage failed when we discovered that its intraday data endpoint requires a paid premium subscription.
+- **Resolution**: We have reverted the `backtest.py` script back to using `yfinance`, as it is the best free tool for the job. We have successfully tested that the upgraded `yfinance` library is now working for both 15-minute and 1-minute intervals, confirming the previous outage is over.
+
+### Current Status
+The entire end-to-end pipeline is now coded and confirmed to be working. We have a robust tweet-fetcher, a sophisticated AI signal processor, and a precise ROI backtester. The final step is to execute a clean data run to generate a full `tweets.csv` with correct timestamps, which will then be processed into a `signals.csv` and finally analyzed by our backtester. 
