@@ -137,20 +137,28 @@ def analyze_ticker_batch(ticker, tweet_batch):
     formatted_tweets = "\n".join([f"- {t['created_at']}: {t['text']}" for t in tweet_batch])
     
     prompt = f"""
-    You are a financial analyst. Analyze the following sequence of tweets for the ticker {ticker}
-    and identify all trading signals. The tweets are in chronological order.
+    You are a financial analyst specializing in interpreting social media signals for stock trading.
+    Your task is to carefully analyze the following sequence of tweets for the ticker {ticker}, which are provided in strict chronological order.
+    Focus on detecting explicit or strongly implied trading signals based on common trading language and context.
+    Be conservative in your classifications: only label a tweet as a signal if it clearly meets the criteria below, avoiding over-interpretation of vague, neutral, or unrelated content.
+    Consider the overall narrative flow across tweets—e.g., an entry might build on prior hype, but don't assume signals where none are evident.
 
-    Tweets:
+    Definitions for actions (only use these; do not invent new ones):
+    - 'entry': Clear buy signals, such as explicit calls to "buy now," "get in," "loading up," mentions of "moon," "breakout," "undervalued," or positive catalysts like "news incoming" with bullish intent. Must indicate initiating or adding to a position.
+    - 'exit': Clear sell signals, such as "taking profits," "dumping," "sell now," "topping out," warnings of "crash" or "resistance," or negative catalysts with bearish intent. Must indicate closing or reducing a position.
+    - 'hold': Explicit advice to maintain a position, like "hold strong," "diamond hands," "not selling yet," or reassurances during dips/volatility.
+    - 'update': Neutral status updates without buy/sell intent, such as price/volume reports ("up 20% today"), news without bias ("earnings tomorrow"), or general observations ("watching closely").
+
+    Tweets to Analyze:
     {formatted_tweets}
 
     Return a JSON object with a "signals" key, containing a list of all detected signals.
     Each signal should be a JSON object with "created_at", "ticker", "action", and "original_text".
-    Actions can be 'entry', 'exit', 'hold', or 'update'.
     """
     
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
         )
@@ -166,10 +174,18 @@ def main():
     """
     Main function to orchestrate the tweet fetching, analysis, and signal generation.
     """
+    INCLUDE_RETWEETS = False # Set to True to include retweets in the analysis
+
     # --- Step 1: Fetch Tweets ---
     if os.path.exists("tweets.csv"):
         print("Loading tweets from existing file: tweets.csv")
         tweets_df = pd.read_csv("tweets.csv", parse_dates=['created_at'])
+        
+        if not INCLUDE_RETWEETS:
+            original_tweets_count = len(tweets_df)
+            tweets_df = tweets_df[~tweets_df['text'].str.startswith("RT @")]
+            print(f"  -> Filtering out retweets. Kept {len(tweets_df)} of {original_tweets_count} tweets.")
+
         # Ensure timezone-awareness
         if tweets_df['created_at'].dt.tz is None:
             tweets_df['created_at'] = tweets_df['created_at'].dt.tz_localize('UTC')
