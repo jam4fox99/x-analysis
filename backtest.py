@@ -40,14 +40,16 @@ def run_backtest(signals_df, mode='all_entries'):
     price_data_cache = {}
     completed_trades = []
     
-    # Use a deque for FIFO logic in 'all_entries' mode
-    open_positions = {ticker.replace('$', ''): deque() for ticker in signals_df['ticker'].unique()}
+    # Ensure all tickers are strings before creating the dictionary
+    unique_tickers = [str(ticker).replace('$', '') for ticker in signals_df['ticker'].unique()]
+    open_positions = {ticker: deque() for ticker in unique_tickers}
     
     # For 'first_entry_only' mode
     processed_first_entry = set()
 
     for _, signal in signals_df.iterrows():
-        ticker = signal['ticker'].replace('$', '') # Clean the ticker symbol FIRST
+        # Ensure the ticker from the signal is also treated as a string
+        ticker = str(signal['ticker']).replace('$', '')
         action = signal['action']
         signal_time = signal['created_at']
 
@@ -111,7 +113,7 @@ def main():
     Main function to load signals and run both backtesting simulations.
     """
     try:
-        signals_df = pd.read_csv("signals.csv", parse_dates=['created_at'])
+        signals_df = pd.read_csv("signals.csv", parse_dates=['created_at'], dtype={'ticker': str})
         signals_df.sort_values(by='created_at', inplace=True)
     except FileNotFoundError:
         print("Error: signals.csv not found. Please run main.py to generate signals first.")
