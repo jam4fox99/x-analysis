@@ -1,12 +1,12 @@
 import os
 import re
 import json
-import time
-import tweepy
+import requests
 import pandas as pd
 import openai
 from dotenv import load_dotenv
 from openai import OpenAI
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Load environment variables from .env file
 load_dotenv()
@@ -15,7 +15,9 @@ load_dotenv()
 X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TARGET_USERNAME = "SarwanJohn"
-TWEET_FETCH_LIMIT = 200 # Max number of tweets to fetch
+TWEET_FETCH_LIMIT = 2000
+GPT_MODEL = "gpt-4.1-nano"
+MAX_WORKERS = 10 # Number of threads for parallel processing
 
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -158,7 +160,7 @@ def analyze_ticker_batch(ticker, tweet_batch):
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-nano",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
         )
@@ -229,13 +231,23 @@ def main():
     # --- Group Tweets by Ticker ---
     ticker_groups = group_tweets_by_ticker(tweets_df)
     print(f"\nGrouped tweets into {len(ticker_groups)} ticker-specific batches.")
+    print(f"Starting analysis using {MAX_WORKERS} threads...")
 
-    # --- Analyze Batches and Save Signals ---
+    # --- Analyze Batches in Parallel ---
     all_signals = []
-    for ticker, batch in ticker_groups.items():
-        signals = analyze_ticker_batch(ticker, batch)
-        if signals:
-            all_signals.extend(signals)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Create a dictionary to map future objects back to their ticker
+        future_to_ticker = {executor.submit(analyze_ticker_batch, ticker, batch): ticker for ticker, batch in ticker_groups.items()}
+        
+        for future in as_completed(future_to_ticker):
+            ticker = future_to_ticker[future]
+            try:
+                signals = future.result()
+                if signals:
+                    all_signals.extend(signals)
+                    print(f"  -> Completed: {ticker} ({len(signals)} signals found)")
+            except Exception as exc:
+                print(f"  -> Error processing {ticker}: {exc}")
 
     if all_signals:
         signals_df = pd.DataFrame(all_signals)
