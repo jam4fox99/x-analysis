@@ -105,22 +105,12 @@ def run_simulation(signals_df, tp, sl):
         
     results_df = pd.DataFrame(trades)
     avg_roi = results_df['ROI (%)'].mean()
-    win_rate = (results_df['ROI (%)'] > 0).mean()
+    win_rate = (results_df['ROI (%)'] > 0).sum() / len(results_df) * 100 if not results_df.empty else 0
     
     return avg_roi, win_rate, trades
 
-def main():
-    """Main function to run the grid search for dual objectives."""
-    try:
-        signals_df = pd.read_csv("signals.csv", parse_dates=['created_at'], dtype={'ticker': str})
-        # Filter for entries and only the first one per ticker
-        signals_df = signals_df[signals_df['action'] == 'entry']
-        signals_df = signals_df.loc[signals_df.groupby('ticker')['created_at'].idxmin()]
-        print(f"Loaded {len(signals_df)} unique first-entry signals.")
-    except FileNotFoundError:
-        print("Error: signals.csv not found. Please run main.py first.")
-        return
-
+def run_full_grid_search(signals_df):
+    """Runs the grid search on a given dataframe and saves the results."""
     best_roi = -np.inf
     best_roi_params = (None, None)
     best_roi_trades = []
@@ -131,7 +121,6 @@ def main():
     
     param_grid = [(tp, sl) for tp in TP_GRID for sl in SL_GRID]
     
-    print("\nStarting grid search for optimal Take-Profit, Stop-Loss, and Win Rate...")
     for tp, sl in tqdm(param_grid, desc="Optimizing"):
         avg_roi, win_rate, trades = run_simulation(signals_df, tp, sl)
         
@@ -144,36 +133,62 @@ def main():
             best_win_rate = win_rate
             best_win_rate_params = (tp, sl)
             best_win_rate_trades = trades
-            
-    print("\n--- Grid Search Complete ---")
-    
-    # --- Results for Best ROI ---
-    if best_roi_params[0] is not None:
-        print("\n--- Best Average ROI Strategy ---")
-        print(f"Optimal Take-Profit: {best_roi_params[0]:.0%}")
-        print(f"Optimal Stop-Loss: {best_roi_params[1]:.0%}")
-        print(f"Best Average ROI: {best_roi:.2f}%")
-        
-        roi_df = pd.DataFrame(best_roi_trades)
-        roi_filename = "optimal_roi_trades.csv"
-        roi_df.to_csv(roi_filename, index=False)
-        print(f"Saved detailed trades for this strategy to '{roi_filename}'")
-    else:
-        print("Could not determine optimal ROI parameters.")
 
-    # --- Results for Best Win Rate ---
-    if best_win_rate_params[0] is not None:
-        print("\n--- Highest Win Rate Strategy ---")
-        print(f"Take-Profit for Best Win Rate: {best_win_rate_params[0]:.0%}")
-        print(f"Stop-Loss for Best Win Rate: {best_win_rate_params[1]:.0%}")
-        print(f"Highest Win Rate: {best_win_rate:.2%}")
-        
-        win_rate_df = pd.DataFrame(best_win_rate_trades)
-        win_rate_filename = "optimal_win_rate_trades.csv"
-        win_rate_df.to_csv(win_rate_filename, index=False)
-        print(f"Saved detailed trades for this strategy to '{win_rate_filename}'")
+    return best_roi_params, best_roi_trades, best_win_rate_params, best_win_rate_trades
+
+def main():
+    """Main function to run the grid search for dual objectives."""
+    try:
+        signals_df = pd.read_csv("signals.csv", parse_dates=['created_at'], dtype={'ticker': str})
+        # Filter for entries and only the first one per ticker
+        signals_df = signals_df[signals_df['action'] == 'entry']
+        signals_df = signals_df.loc[signals_df.groupby('ticker')['created_at'].idxmin()]
+        signals_df.sort_values(by='created_at', inplace=True) # Ensure chronological order
+        print(f"Loaded {len(signals_df)} unique first-entry signals.")
+    except FileNotFoundError:
+        print("Error: signals.csv not found. Please run main.py first.")
+        return
+
+    # --- 1. Run Grid Search on the ENTIRE dataset (as before) ---
+    print("\n--- Running Grid Search on ENTIRE dataset ---")
+    full_best_roi_params, full_best_roi_trades, _, _ = run_full_grid_search(signals_df)
+    
+    if full_best_roi_trades:
+        print(f"\nOptimal ROI Params (Full Dataset): TP={full_best_roi_params[0]:.2%}, SL={full_best_roi_params[1]:.2%}")
+        pd.DataFrame(full_best_roi_trades).to_csv("optimal_roi_trades.csv", index=False)
+        print("Saved full dataset optimal ROI trades to 'optimal_roi_trades.csv'")
     else:
-        print("Could not determine optimal win rate parameters.")
+        print("\nNo trades were completed in the full dataset simulation.")
+
+    # --- 2. Split data for In-Sample / Out-of-Sample testing ---
+    split_index = len(signals_df) // 2
+    in_sample_df = signals_df.iloc[:split_index]
+    out_of_sample_df = signals_df.iloc[split_index:]
+    print(f"\n--- Splitting data for Out-of-Sample Test ---")
+    print(f"  -> In-sample (first half): {len(in_sample_df)} signals")
+    print(f"  -> Out-of-sample (second half): {len(out_of_sample_df)} signals")
+    
+    # --- 3. Run Grid Search on the FIRST HALF (In-Sample) to find parameters ---
+    print("\n--- Running Grid Search on IN-SAMPLE data (first half) ---")
+    in_sample_best_params, _, _, _ = run_full_grid_search(in_sample_df)
+    
+    if in_sample_best_params[0] is None:
+        print("\nCould not determine optimal parameters from the in-sample data. Halting.")
+        return
+        
+    print(f"\nOptimal ROI Params (In-Sample): TP={in_sample_best_params[0]:.2%}, SL={in_sample_best_params[1]:.2%}")
+
+    # --- 4. Run ONE simulation on the SECOND HALF (Out-of-Sample) using the found parameters ---
+    print("\n--- Running ONE simulation on OUT-OF-SAMPLE data (second half) ---")
+    oos_tp, oos_sl = in_sample_best_params
+    oos_avg_roi, oos_win_rate, oos_trades = run_simulation(out_of_sample_df, oos_tp, oos_sl)
+
+    if oos_trades:
+        print(f"\nOut-of-Sample Results: Avg ROI={oos_avg_roi:.2f}%, Win Rate={oos_win_rate:.2f}%")
+        pd.DataFrame(oos_trades).to_csv("out_of_sample_analysis.csv", index=False)
+        print("Saved out-of-sample analysis trades to 'out_of_sample_analysis.csv'")
+    else:
+        print("\nNo trades were completed in the out-of-sample simulation.")
 
 if __name__ == "__main__":
     main() 
