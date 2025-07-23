@@ -1,71 +1,95 @@
-# Project Overview: X-Based Trading Signal Analysis and Backtesting Bot
+# X/Twitter Trading Signal Analysis & Optimization Project
 
-## 1. Core Idea
+## 1. High-Level Project Goal
 
-To develop a trading bot that analyzes posts from selected X users to identify trading signals. These signals will be timestamped, and their effectiveness will be evaluated through rigorous backtesting against historical market data. The initial phase of the project will focus exclusively on backtesting to validate the strategy and identify high-quality signal providers.
+The primary objective of this project is to create a sophisticated, end-to-end automated trading analysis pipeline. The system leverages social media sentiment from X (formerly Twitter) to identify potential stock trading signals, rigorously backtests these signals against historical market data, and systematically optimizes exit strategies to maximize profitability and win rates. It is designed to transform unstructured social media chatter into actionable, data-driven trading insights.
 
-## 2. Key Components & Feasibility
+---
 
-### 2.1. Data Acquisition via X API
+## 2. The Four-Stage Pipeline
 
-- **Objective**: Pull posts from target X users.
-- **Feasibility**: Viable, but access to data is tiered and comes with costs and limitations.
-  - **Basic Tier ($200/mo)**: Allows reading 10,000 posts/month, limited to the most recent 3,200 posts per user. Suitable for a small-scale prototype.
-  - **Pro Tier ($5,000/mo)**: 1,000,000 posts/month, better for scaling but still has the 3,200 recent post limit per user timeline.
-  - **Enterprise Tier (Custom Price)**: Required for full historical access beyond the 3,200 post limit. Very expensive.
-- **Key Challenge**: Accessing deep historical data is a significant cost barrier. The initial prototype must work within the "most recent 3,200 posts" constraint.
-- **Compliance**: Adherence to X's Terms of Service is mandatory to avoid API access being revoked.
+The project operates in a four-stage, sequential pipeline: Data Acquisition -> Signal Generation -> Performance Backtesting -> Strategy Optimization.
 
-### 2.2. Timestamping and Signal Extraction
+### Stage 1: Data Acquisition (Tweet Scraping)
 
-- **Timestamping**: Straightforward. The `created_at` field in the API response provides a precise UTC timestamp for each post.
-- **Signal Extraction**: This is the core AI challenge.
-  - **Method**: Use Natural Language Processing (NLP) to parse post content for trading signals (e.g., "buying $STOCK", "shorting $TICKER").
-  - **Tools**: Libraries like Hugging Face Transformers, spaCy, or APIs like OpenAI can be used to classify sentiment and identify entry/exit points.
-  - **Challenges**: Posts can be noisy, sarcastic, or promotional. A robust model is needed to filter out low-quality signals and interpret context correctly.
+This stage is responsible for gathering the raw data (tweets) needed for analysis.
 
-### 2.3. Backtesting
+-   **Data Source:** Instead of the expensive official X API, the system uses the **Apify Tweet Scraper API**. This provides a cost-effective and scalable solution for fetching large volumes of tweets.
+-   **Fetching Mechanism:** The system is configured to scrape up to 10,000 of the latest tweets from a specified X user (e.g., 'SarwanJohn').
+-   **Asynchronous & Robust:** To handle potentially long-running requests for thousands of tweets without timing out, the system implements a robust, asynchronous API call pattern:
+    1.  It sends an initial request to *start* the scraping job on Apify's servers.
+    2.  It then polls a status endpoint periodically to check if the job is complete.
+    3.  Once the job is finished, it makes a final call to retrieve the full dataset of tweets.
+-   **Data Caching:** The fetched tweets are saved locally to `tweets.csv`. This acts as a cache, preventing the need for repeated, costly API calls during development and re-analysis.
+-   **Filtering:** The system includes a flag (`INCLUDE_RETWEETS`) to control whether retweets should be included in the dataset, allowing for cleaner, more focused analysis on original content if desired.
 
-- **Objective**: Simulate the trading strategy based on extracted signals and historical market data to measure performance.
-- **Process**:
-  1.  Align the timestamped signals with historical price data from sources like Yahoo Finance or Alpha Vantage.
-  2.  Define trade execution logic (e.g., enter at the next market open after a signal).
-  3.  Define exit rules (e.g., based on a follow-up post, a fixed time, or price target).
-- **Tools**: Python libraries like `Backtrader` or `Zipline` are industry standards for this purpose.
-- **Metrics**: Evaluate performance using Sharpe ratio, win rate, max drawdown, and overall profitability.
+*Orchestrated by: `main.py`*
 
-## 3. Project Phases
+### Stage 2: Intelligent Signal Generation (AI Analysis)
 
-### Phase 1: Backtesting and User Analysis (Current Focus)
+This is the core "intelligence" of the system, where raw tweets are converted into structured trading signals.
 
-The primary goal is to prove the strategy's viability *before* considering live trading.
-- **Tasks**:
-  1.  Select a small group of influential traders on X to monitor.
-  2.  Subscribe to a suitable API tier (likely Basic) for initial data pulls.
-  3.  Develop the NLP model to extract signals from their recent posts.
-  4.  Build and run the backtesting engine to evaluate the historical performance of these signals.
-  5.  Analyze results to identify which users (if any) provide alpha.
+-   **AI Model:** The system utilizes OpenAI's powerful language models (specifically **`gpt-4o-mini`**) to analyze the text.
+-   **Contextual Batching Strategy:** Instead of analyzing tweets one-by-one or in a simple chronological stream, the system employs a "smarter" method. It groups all tweets by the stock ticker they mention (e.g., all `$AAPL` tweets are batched together, all `$TSLA` tweets are batched together). This provides the AI with the complete, ordered narrative for a single stock, allowing it to detect trends, hype cycles, and sentiment shifts with much higher accuracy.
+-   **Advanced AI Prompting:** A detailed and carefully engineered prompt guides the AI. It instructs the model to act as a conservative financial analyst and to classify tweets into one of four distinct actions, with strict definitions to avoid ambiguity:
+    -   `entry`: Clear "buy" or "accumulate" signals.
+    -   `exit`: Clear "sell" or "take profit" signals.
+    -   `hold`: Explicit advice to maintain a position.
+    -   `update`: Neutral news or observations without trading intent.
+-   **Multithreaded Processing:** To accelerate the analysis of potentially hundreds of ticker-specific batches, the AI analysis is parallelized using a `ThreadPoolExecutor`, significantly reducing the total processing time.
+-   **Output:** The generated signals (containing timestamp, ticker, action, and original tweet text) are saved to `signals.csv`, which serves as the foundational dataset for all subsequent stages.
 
-### Phase 2: Real-Time Implementation (Future Goal)
+*Orchestrated by: `main.py`*
 
-- **Condition**: Only proceed if Phase 1 demonstrates consistent, positive backtesting results.
-- **Requirements**:
-  - Upgrade to a higher-tier API plan (Pro or Enterprise) to use the real-time streaming endpoint.
-  - Develop a live trading bot that executes trades based on real-time signals.
-  - Implement robust risk management and monitoring systems.
+### Stage 3: Dual-Mode Performance Backtesting
 
-## 4. Risks and Considerations
+This stage simulates historical trading based on the generated signals to evaluate their past performance. It runs two separate simulations to provide both an aggressive and a conservative performance outlook.
 
-- **Cost**: API fees are a primary constraint, especially for historical data and real-time streaming.
-- **Signal Quality**: Social media sentiment is notoriously noisy. The success of the entire project hinges on the ability to accurately extract high-quality signals.
-- **Overfitting**: Backtests may produce overly optimistic results that do not translate to live performance. Out-of-sample validation is critical.
-- **Market Dynamics**: Assumes past performance of a user's signals is indicative of future results, which may not be true.
+-   **Data Sources:** Uses the AI-generated `signals.csv` and fetches historical intraday stock price data from the **Alpha Vantage API**.
+-   **Mode 1: "All Entries" (Aggressive Strategy)**
+    -   Treats *every* `entry` signal as a new, independent trade.
+    -   Uses a First-In, First-Out (FIFO) queue (`collections.deque`) to manage multiple open positions for the same stock. When an `exit` signal appears, it closes the earliest open position.
+-   **Mode 2: "First Entry Only" (Conservative Strategy)**
+    -   Only trades the *very first* chronological `entry` signal for each unique stock. All subsequent `entry` signals for that same stock are ignored.
+    -   This simulates a more cautious approach, preventing over-exposure to a single asset.
+-   **ROI Calculation:** For each completed trade, it calculates the Return on Investment (ROI). It also calculates a "holding ROI" for positions that remain open at the end of the simulation, based on the last known stock price.
+-   **Output:** The detailed results of each simulation, including every trade, entry/exit prices, and ROI, are saved to separate files: `roi_analysis_all_entries.csv` and `roi_analysis_first_entry_only.csv`.
 
-## 5. Proposed Tech Stack (Prototype)
+*Orchestrated by: `backtest.py`*
 
-- **Programming Language**: Python
-- **X API Interaction**: `tweepy`
-- **Data Analysis**: `pandas`, `numpy`
-- **NLP/AI**: `Hugging Face Transformers`, `spaCy`
-- **Backtesting**: `backtrader`
-- **Market Data**: `yfinance` or `Alpha Vantage` 
+### Stage 4: Grid Search Optimization for Exit Strategy
+
+This final stage aims to find the optimal exit strategy by testing a vast number of Take-Profit (TP) and Stop-Loss (SL) combinations.
+
+-   **Methodology:** It performs a **grid search**, a systematic method for hyperparameter tuning. It iterates through a predefined grid of parameters:
+    -   Take-Profit (TP) levels from 5% to 200% (in 5% increments).
+    -   Stop-Loss (SL) levels from 5% to 100% (in 5% increments).
+-   **Forward Simulation:** For each `entry` signal and every (TP, SL) pair, it runs a forward-looking simulation. It fetches up to 60 days of daily historical data from Alpha Vantage and checks each day to see if the TP price (`entry_price * (1 + tp_percentage)`) or SL price (`entry_price * (1 - sl_percentage)`) was hit.
+-   **Dual Optimization Objectives:** The grid search aims to find the best (TP, SL) combination according to two different metrics:
+    1.  **Highest Average ROI:** The combination that yields the greatest average return across all trades.
+    2.  **Highest Win Rate:** The combination that results in the highest percentage of winning trades.
+-   **Data Caching:** To minimize redundant API calls to Alpha Vantage, it caches the historical price data for each ticker.
+-   **Output:** The system saves the detailed trade lists corresponding to the two optimal strategies into `optimal_roi_trades.csv` and `optimal_win_rate_trades.csv`.
+
+*Orchestrated by: `grid_search_optimizer.py`*
+
+---
+
+## 3. Technical Stack & Key Components
+
+-   **Programming Language:** Python 3
+-   **Core Libraries:**
+    -   `pandas`: For all data manipulation, from reading CSVs to structuring analysis results.
+    -   `requests`: For all HTTP API communication with Apify and Alpha Vantage.
+    -   `openai`: For interacting with the GPT models.
+    -   `python-dotenv`: For securely managing API keys from a `.env` file.
+    -   `concurrent.futures`: For enabling multithreading in the AI analysis stage.
+    -   `collections.deque`: For implementing the FIFO logic in the backtester.
+-   **APIs:**
+    -   **Apify:** For scalable and cost-effective tweet scraping.
+    -   **OpenAI:** For natural language understanding and signal classification.
+    -   **Alpha Vantage:** For historical daily and intraday stock price data.
+-   **Environment & Version Control:**
+    -   `.env` file: Securely stores all necessary API keys (`APIFY_API_TOKEN`, `OPENAI_API_KEY`, `ALPHA_VANTAGE_API_KEY`).
+    -   `.gitignore`: Properly configured to exclude the `.env` file, generated `.csv` data, and Python cache files from version control.
+    -   **Git & GitHub:** Used for version control, allowing for iterative development, rollbacks, and code collaboration. 

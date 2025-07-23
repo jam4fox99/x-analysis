@@ -15,9 +15,9 @@ load_dotenv()
 # --- Configuration ---
 APIFY_API_TOKEN = os.getenv("APIFY_API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TARGET_USERNAME = "SarwanJohn"
-TWEET_FETCH_LIMIT = 10000 # Increased limit
-GPT_MODEL = "gpt-4.1-nano"
+TARGET_USERNAME = "blondesnmoney"
+TWEET_FETCH_LIMIT = 15000 # Increased limit
+GPT_MODEL = "o4-mini"
 MAX_WORKERS = 10 # Number of threads for parallel processing
 
 # Initialize OpenAI client
@@ -106,6 +106,12 @@ def save_tweets_to_csv(tweets, filename="tweets.csv"):
     df.to_csv(filename, index=False)
     print(f"Saved {len(df)} tweets to {filename}")
 
+    # Also save to user-specific directory
+    user_dir = f"@{TARGET_USERNAME}"
+    if os.path.exists(user_dir):
+        df.to_csv(os.path.join(user_dir, filename), index=False)
+        print(f"Saved copy of tweets to {user_dir}/{filename}")
+
 def load_tweets_from_csv(filename="tweets.csv"):
     """Loads tweets from a CSV file."""
     if not os.path.exists(filename):
@@ -129,42 +135,82 @@ def group_tweets_by_ticker(tweets_df):
         
     return ticker_groups
 
-# --- Analysis Function ---
+def get_llm_analysis_prompt(ticker, formatted_tweets):
+    """
+    Generates the full prompt for the LLM to analyze tweets for a specific ticker.
+    This prompt is designed to be highly specific to reduce noisy or ambiguous signals.
+    """
+    prompt = f"""
+You are a financial analyst specializing in social media sentiment for trading. Analyze this sequence of tweets for the ticker {ticker}, listed in chronological order.
+
+**Your most important rule:**  
+Label as 'talk' unless the tweet contains an absolutely clear trading action (buy, sell, short, or hold) for {ticker}. Most tweets will be 'talk'.
+
+**Actions to choose from (choose only one per tweet):**
+- 'entry': Clear language indicating the user is buying {ticker} or entering/adding to a LONG position. Only classify as 'entry' if the tweet directly says they are buying or entering.  
+- 'short': Clear language indicating the user is entering or adding to a SHORT position, betting against {ticker} (e.g., "shorting", "puts", "bearish play", "betting against").
+- 'exit': Clear language that the user is closing or reducing a LONG or SHORT position (e.g., "sold", "closed position", "taking profit", "stopped out", "exited").
+- 'hold': Clear language that the user is staying in a position ("still holding", "not selling", "diamond hands").
+- 'talk': If the tweet mentions {ticker} without a clear trading action (just opinion, news, jokes, questions, or analysis), label as 'talk'.
+
+**Extra Guidance:**
+- Because all tweets with this ticker are shown, it is UNLIKELY that there will be multiple 'entry' or 'short' signals for the same ticker **unless** the user **explicitly** states they are adding more, re-entering, or averaging down/up (e.g., "Bought more $TSLA", "Re-entered $TSLA", "Averaging down on $TSLA").
+- If an 'entry' or 'short' has already been labeled in previous tweets, do NOT label additional 'entry' or 'short' actions unless the new tweet is absolutely clear about adding/re-entering to the position.
+- DO NOT classify as 'entry', 'short', 'exit', or 'hold' unless the tweet clearly says so. Ambiguous, general, or hype language should be 'talk'.
+- Do NOT assume intent from excitement, hype, or analysis. Only use 'entry' or 'short' if the tweet directly states or obviously implies a trade is being made.
+- If you are unsure, label as 'talk'.
+
+**Examples:**
+
+- "Just bought $TSLA, let’s go!" → 'entry'
+- "Bought more $TSLA today." (after a previous entry) → 'entry'
+- "Thinking about $TSLA, might enter soon." → 'talk'
+- "Shorting $TSLA here." → 'short'
+- "Added to my $TSLA short position." (after a previous short) → 'short'
+- "$TSLA up 10% today, wild!" → 'talk'
+- "Still holding $TSLA, not selling yet." → 'hold'
+- "Sold $TSLA for a nice profit." → 'exit'
+- "I like $TSLA but not buying yet." → 'talk'
+- "Bought some $TSLA puts." → 'short'
+- "$TSLA is interesting lately." → 'talk'
+- "Entering TSLA here" -> 'entry'
+
+**Tweets to Analyze:**
+{formatted_tweets}
+
+Return a JSON object with a "signals" key, containing a list of all detected signals. Each signal must include "created_at", "ticker", "action", and "original_text".
+"""
+    return prompt
+
 def analyze_ticker_batch(ticker, tweet_batch):
     """Analyzes a batch of tweets for a single ticker."""
     print(f"\nAnalyzing batch for {ticker}...")
     
     formatted_tweets = "\n".join([f"- {t['created_at']}: {t['text']}" for t in tweet_batch])
     
-    prompt = f"""
-    You are a financial analyst specializing in interpreting social media signals for stock trading.
-    Your task is to carefully analyze the following sequence of tweets for the ticker {ticker}, which are provided in strict chronological order.
-    Focus on detecting explicit or strongly implied trading signals based on common trading language and context.
-    Be conservative in your classifications: only label a tweet as a signal if it clearly meets the criteria below, avoiding over-interpretation of vague, neutral, or unrelated content.
-    Consider the overall narrative flow across tweets—e.g., an entry might build on prior hype, but don't assume signals where none are evident.
-
-    Definitions for actions (only use these; do not invent new ones):
-    - 'entry': Clear buy signals, such as explicit calls to "buy now," "get in," "loading up," mentions of "moon," "breakout," "undervalued," or positive catalysts like "news incoming" with bullish intent. Must indicate initiating or adding to a position.
-    - 'exit': Clear sell signals, such as "taking profits," "dumping," "sell now," "topping out," warnings of "crash" or "resistance," or negative catalysts with bearish intent. Must indicate closing or reducing a position.
-    - 'hold': Explicit advice to maintain a position, like "hold strong," "diamond hands," "not selling yet," or reassurances during dips/volatility.
-    - 'update': Neutral status updates without buy/sell intent, such as price/volume reports ("up 20% today"), news without bias ("earnings tomorrow"), or general observations ("watching closely").
-
-    Tweets to Analyze:
-    {formatted_tweets}
-
-    Return a JSON object with a "signals" key, containing a list of all detected signals.
-    Each signal should be a JSON object with "created_at", "ticker", "action", and "original_text".
-    """
+    prompt = get_llm_analysis_prompt(ticker, formatted_tweets)
     
     try:
         response = client.chat.completions.create(
             model=GPT_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
         )
-        result_text = response.choices[0].message.content
-        signals_data = json.loads(result_text)
-        return signals_data.get("signals", [])
+        # Assuming the response is a JSON string that needs to be parsed
+        analysis = json.loads(response.choices[0].message.content)
+        
+        # Ensure the 'signals' key exists and is a list
+        signals = analysis.get('signals', [])
+        if not isinstance(signals, list):
+            print(f"  -> Warning: 'signals' key for {ticker} is not a list. Skipping.")
+            return []
+
+        # Filter out any 'talk' signals before returning
+        return [s for s in signals if s.get('action') != 'talk']
+
+    except json.JSONDecodeError:
+        # This can happen if the model returns an empty string or non-JSON response
+        print(f"  -> Could not decode JSON for {ticker}. Model likely returned no signals. Skipping.")
+        return []
     except Exception as e:
         print(f"  -> Could not analyze batch for {ticker}. Error: {e}")
         return []
@@ -219,10 +265,19 @@ def main():
 
     if all_signals:
         signals_df = pd.DataFrame(all_signals)
-        signals_df['created_at'] = pd.to_datetime(signals_df['created_at'])
+        # Use format='ISO8601' to handle different timezone notations from the LLM
+        signals_df['created_at'] = pd.to_datetime(signals_df['created_at'], format='ISO8601')
         signals_df.sort_values(by='created_at', inplace=True)
+        
+        # Save to main directory
         signals_df.to_csv("signals.csv", index=False)
         print(f"\nSaved {len(signals_df)} signals to signals.csv")
+
+        # Also save to user-specific directory
+        user_dir = f"@{TARGET_USERNAME}"
+        if os.path.exists(user_dir):
+            signals_df.to_csv(os.path.join(user_dir, "signals.csv"), index=False)
+            print(f"Saved signals to {user_dir}/signals.csv")
     else:
         print("\nNo signals were generated.")
 
